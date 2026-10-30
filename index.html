@@ -997,3 +997,289 @@ const HOTSPOTS = [
    d:"尾翼的可动部件与新动力单元的部署策略是一体的：能量回收与投放的窗口，直接决定车手在直道上能拿到多少速度。单圈最大回收为 9.0 MJ，官方注明视赛道而定。",
    m:[["MGU-K","350 kW / 60,000 rpm"],["可用储能","4.0 MJ"],["单圈回收","9.0 MJ（视赛道）"]]}
 ];
+const TIMELINE = [
+  ...ROUNDS.map(x=>({k:"race", ...x})),
+  {k:"cancel", r:"—", gp:"巴林（4 月，原定）", date:"04-12", note:"因中东局势取消"},
+  {k:"cancel", r:"—", gp:"沙特阿拉伯（4 月，原定）", date:"04-19", note:"因中东局势取消"},
+  {k:"next", r:19, gp:"墨西哥", date:"11-01", note:"进行中 · 未出结果"},
+  {k:"next", r:20, gp:"巴西", date:"TBD", note:"未举行"},
+  {k:"next", r:21, gp:"拉斯维加斯", date:"TBD", note:"未举行"},
+  {k:"next", r:22, gp:"卡塔尔", date:"TBD", note:"未举行"},
+  {k:"next", r:23, gp:"阿布扎比", date:"TBD", note:"未举行 · 收官"}
+];
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+/* --- season rail --- */
+$("#rail").innerHTML = ROUNDS.map(x=>`
+  <article class="round ${x.team==="Mercedes"?"win":"loss"}">
+    <div class="rn"><span>R${String(x.r).padStart(2,"0")}</span><span class="flag">${x.date}</span></div>
+    <div class="gp">${x.gp}</div>
+    <div class="res"><b>${x.win}</b><br>${x.me}</div>
+  </article>`).join("");
+
+/* 边缘悬停自动横移：越贴近边缘越快，缓入缓出，整体很慢 */
+const rail = $("#rail");
+let railGoal = 0, railVel = 0, railAcc = 0, railRAF = null;
+const RAIL_MAX = 2.6;                       // px/frame ≈ 156px/s
+function railTick(){
+  railVel += (railGoal - railVel) * 0.09;   // 缓动拉长 → 更丝滑
+  const max = Math.max(0, rail.scrollWidth - rail.clientWidth);
+  if(Math.abs(railVel) < 0.02){ railVel = 0; railRAF = null; return; }
+  if((rail.scrollLeft <= 0.5 && railVel < 0) || (rail.scrollLeft >= max - 0.5 && railVel > 0)){
+    railVel = 0; railRAF = null; return;
+  }
+  railAcc += railVel;
+  const step = railAcc > 0 ? Math.floor(railAcc) : Math.ceil(railAcc);
+  if(step !== 0){
+    rail.scrollLeft = Math.max(0, Math.min(max, rail.scrollLeft + step));
+    railAcc -= step;
+  }
+  railRAF = requestAnimationFrame(railTick);
+}
+function railAimSet(v){
+  railGoal = v;
+  if(railRAF === null){ railAcc = 0; railRAF = requestAnimationFrame(railTick); }
+}
+if(rail){
+  rail.addEventListener("pointermove", e => {
+    if(e.pointerType && e.pointerType !== "mouse") return;
+    const r = rail.getBoundingClientRect();
+    // 全程按“偏离中线的比例”给速度：只留 12% 的中央静止带
+    const t = (e.clientX - r.left) / r.width;          // 0 → 1
+    const dead = 0.06;                                  // 中线两侧各 6% 不滚
+    if(t < 0.5 - dead){
+      const k = ((0.5 - dead) - t) / (0.5 - dead);      // 0 → 1
+      railAimSet(-RAIL_MAX * Math.pow(k, 0.85));
+    }else if(t > 0.5 + dead){
+      const k = (t - (0.5 + dead)) / (0.5 - dead);
+      railAimSet(RAIL_MAX * Math.pow(k, 0.85));
+    }else{
+      railAimSet(0);
+    }
+  });
+  rail.addEventListener("pointerleave", () => railAimSet(0));
+  rail.addEventListener("pointerdown", () => railAimSet(0));
+}
+
+/* --- featured races --- */
+$("#vicGrid").innerHTML = FEATURED.map(f=>{
+  let body = "";
+  if(f.gaps){
+    const max = Math.max(...f.gaps.map(g=>g[1]), 1);
+    body = `<div class="gaps">` + f.gaps.map(g=>{
+      const w = Math.max(2, (g[1]/max)*100);
+      return `<div class="gap ${g[2]?"is-win":""}"><span class="who">${g[0]}</span><span class="bar"><i data-w="${w}"></i></span><span class="t">${g[1]===0?"WIN":"+"+g[1].toFixed(3)}</span></div>`;
+    }).join("") + `</div>`;
+  } else {
+    body = `<dl class="facts">` + f.facts.map(([k,v])=>
+      `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("") + `</dl>`;
+  }
+  return `<div class="vic">
+    <div class="top"><span class="gp">${f.gp}</span><span class="date">${f.date}</span></div>
+    <div class="headline">${f.headline}</div>
+    ${body}
+    <div class="note">${f.note}</div>
+  </div>`;
+}).join("");
+
+/* --- bar charts --- */
+function bars(el, data, unit="s", fmt=v=>v===0?"0":v.toFixed(3)){
+  const max = Math.max(...data.map(d=>d[1]), 1);
+  el.innerHTML = data.map(([name,val,me])=>`
+    <div class="brow ${me?"me":""}">
+      <span class="name">${name}</span>
+      <span class="time">${fmt(val)}${unit}</span>
+      <span class="track"><i data-w="${Math.max(1,(val/max)*100)}"></i></span>
+    </div>`).join("");
+}
+bars($("#chartAustin"), AUSTIN);
+bars($("#chartSingapore"), SINGAPORE);
+bars($("#chartTeams"), TEAMS, "", v=>v);
+bars($("#chartWins"), WINS, "", v=>v);
+
+/* --- standings --- */
+$("#standTable").innerHTML = STANDINGS.map(([n,t,p],i)=>`
+  <tr class="${t==="Mercedes-AMG"?"me":""}"><td>${i+1}. ${n}</td><td class="p">${p}</td></tr>`).join("")
+  + `<tr class="team-line"><td>Constructors</td><td class="p"></td></tr>`
+  + `<tr class="me"><td>1. Mercedes-AMG</td><td class="p">607</td></tr>`
+  + `<tr><td>2. Ferrari</td><td class="p">474</td></tr>`
+  + `<tr><td>3. Red Bull</td><td class="p">355</td></tr>`
+  + `<tr><td>4. McLaren</td><td class="p">355</td></tr>`;
+
+/* --- timeline --- */
+$("#timeline").innerHTML = TIMELINE.map(x=>{
+  if(x.k==="race"){
+    const win = x.team==="Mercedes";
+    return `<div class="tl-item ${win?"win":""}">
+      <span class="rd">R${String(x.r).padStart(2,"0")} · ${x.date}</span>
+      <span class="nm">${x.gp}<small>${x.win} · ${x.team}</small></span>
+      <span class="rs">${x.me}</span></div>`;
+  }
+  if(x.k==="cancel"){
+    return `<div class="tl-item cancel">
+      <span class="rd">— · ${x.date}</span>
+      <span class="nm">${x.gp}<small>${x.note}</small></span>
+      <span class="rs">CANCELLED</span></div>`;
+  }
+  return `<div class="tl-item next">
+    <span class="rd">R${String(x.r).padStart(2,"0")} · ${x.date}</span>
+    <span class="nm">${x.gp}<small>${x.note}</small></span>
+    <span class="rs">TBD</span></div>`;
+}).join("");
+
+/* --- hotspots：悬停切换 + 文案过渡 --- */
+let hot = -1, hotTimer = null;
+const hotBody = document.getElementById("hotBody");
+const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function renderHot(i){
+  const h = HOTSPOTS[i];
+  document.getElementById("hotIdx").textContent = h.i;
+  document.getElementById("hotTitle").textContent = h.t;
+  document.getElementById("hotText").textContent = h.d;
+  const [a,b,c] = h.m;
+  document.getElementById("hotRule").textContent = a[1];
+  document.getElementById("hotThen").textContent = b[1];
+  document.getElementById("hotAct").textContent  = c[1];
+}
+
+function paintHot(i, instant){
+  if(i === hot) return;
+  hot = i;
+  // 标记与胶囊标签立刻响应，正文再做过渡
+  $$("#hotspotFig .dot").forEach((d,k)=>d.setAttribute("aria-selected", String(k===i)));
+  $$(".hotspot-tabs button").forEach((d,k)=>d.setAttribute("aria-selected", String(k===i)));
+
+  if(!hotBody){ renderHot(i); return; }
+  if(instant || calm()){
+    renderHot(i);
+    hotBody.classList.remove("out");
+    hotBody.style.opacity = "";
+    return;
+  }
+  hotBody.classList.add("out");
+  clearTimeout(hotTimer);
+  hotTimer = setTimeout(()=>{
+    renderHot(i);
+    // 下一帧再移除 .out，确保过渡从 0 重新开始（避免样式合并后瞬跳）
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      hotBody.classList.remove("out");
+    }));
+  }, 185);
+}
+$$("#hotspotFig .dot").forEach(d=>{
+  const go = () => paintHot(+d.dataset.hot);
+  d.addEventListener("mouseenter", go);
+  d.addEventListener("focus", go);
+  d.addEventListener("click", go);
+});
+$$(".hotspot-tabs button").forEach(d=>d.addEventListener("click",()=>paintHot(+d.dataset.hot)));
+paintHot(0, true);
+setTimeout(()=>{ if(hotBody){ hotBody.classList.remove("out"); hotBody.style.opacity = ""; } }, 1200);
+
+/* --- 车手画框：触屏点击切换近景 --- */
+$$(".driver-media").forEach(m=>{
+  m.addEventListener("click", ()=>{ if(matchMedia("(hover:none)").matches) m.classList.toggle("on"); });
+});
+
+/* --- lightbox --- */
+const lb = $("#lightbox"), lbImg = $("#lbImg"), lbCap = $("#lbCap");
+$$("#gallery .gitem").forEach(f=>f.addEventListener("click",()=>{
+  lbImg.src = f.querySelector("img").src; lbImg.alt = f.querySelector("img").alt;
+  lbCap.textContent = f.dataset.cap; lb.classList.add("on"); document.body.style.overflow="hidden";
+}));
+function closeLb(){ lb.classList.remove("on"); document.body.style.overflow=""; }
+$("#lbClose").onclick = closeLb;
+lb.addEventListener("click",e=>{ if(e.target===lb) closeLb(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeLb(); });
+
+/* ============================================================
+   MOTION — reveal, counters, bars, parallax, chrome
+   ============================================================ */
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const ioCount = new IntersectionObserver(es=>{
+  es.forEach(e=>{ if(e.isIntersecting){ countUp(e.target); ioCount.unobserve(e.target); } });
+},{threshold:.4});
+$$("[data-count]").forEach(el=>ioCount.observe(el));
+
+const io = new IntersectionObserver(es=>{
+  es.forEach(e=>{
+    if(!e.isIntersecting) return;
+    e.target.classList.add("in");
+    e.target.querySelectorAll("[data-w]").forEach(b=>{ b.style.width = b.dataset.w + "%"; });
+    e.target.querySelectorAll("[data-count]").forEach(countUp);
+    io.unobserve(e.target);
+  });
+},{threshold:.18, rootMargin:"0px 0px -8% 0px"});
+$$("[data-reveal]").forEach(el=>io.observe(el));
+
+function countUp(el){
+  if(el.dataset.done) return;
+  el.dataset.done = "1";
+  const target = +el.dataset.count;
+  if(reduce){ el.textContent = target.toLocaleString(); return; }
+  const dur = 1100, t0 = performance.now();
+  (function tick(t){
+    const p = Math.min(1,(t-t0)/dur);
+    const v = Math.round(target * (1-Math.pow(1-p,3)));
+    el.textContent = v >= 1000 ? v.toLocaleString() : v;
+    if(p<1) requestAnimationFrame(tick);
+  })(t0);
+}
+
+/* bars inside cards that are not [data-reveal] themselves */
+const io2 = new IntersectionObserver(es=>{
+  es.forEach(e=>{ if(e.isIntersecting){ e.target.style.width = e.target.dataset.w+"%"; io2.unobserve(e.target); } });
+},{threshold:.4});
+setTimeout(()=>$$(".gap i[data-w], .brow i[data-w]").forEach(b=>io2.observe(b)), 60);
+
+/* parallax */
+const heroImg = $(".hero-media img");
+let ticking = false;
+addEventListener("scroll",()=>{
+  if(reduce) return;
+  if(ticking) return;
+  ticking = true;
+  requestAnimationFrame(()=>{
+    const y = scrollY;
+    if(y < innerHeight*1.2) heroImg.style.transform = `translateY(${y*0.16}px) scale(1.06)`;
+    ticking = false;
+  });
+},{passive:true});
+
+/* progress + chrome + nav */
+const chrome = $("#chrome"), navLinks = $$("#nav a");
+const sections = ["machine","data","victories","battle","drivers","details","season"];
+function onScroll(){
+  const h = document.documentElement;
+  const p = h.scrollTop / (h.scrollHeight - h.clientHeight);
+  $("#progress").style.width = (p*100)+"%";
+  chrome.classList.toggle("solid", h.scrollTop > 60);
+  let cur = "";
+  sections.forEach(id=>{
+    const el = document.getElementById(id);
+    if(el && el.getBoundingClientRect().top <= innerHeight*0.4) cur = id;
+  });
+  navLinks.forEach(a=>a.classList.toggle("active", a.getAttribute("href") === "#"+cur));
+}
+addEventListener("scroll", onScroll, {passive:true});
+onScroll();
+
+/* 保险丝：若观察器未触发（旧内核 / 异常），3 秒后强制显示全部内容 */
+setTimeout(()=>{
+  $$("[data-reveal]:not(.in)").forEach(el=>{
+    if(el.getBoundingClientRect().top < innerHeight){
+      el.classList.add("in");
+      el.querySelectorAll("[data-count]").forEach(countUp);
+    }
+  });
+}, 3000);
+</script>
+</body>
+</html>
